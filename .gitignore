@@ -1,0 +1,14 @@
+venv
+uncleaned_csvs
+Cleaned_csvs/
+CLI Version server.zip
+Cleaned_CSVs/cleaned_Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Friday-WorkingHours-Morning.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Monday-WorkingHours.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Tuesday-WorkingHours.pcap_ISCX.csv
+Cleaned_CSVs/cleaned_Wednesday-workingHours.pcap_ISCX.csv
+Cleaned_CSVs/combined.csv
+Cleaned_CSVs/merge.ipynb

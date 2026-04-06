@@ -1,0 +1,23 @@
+body {
+    background: #0d1117;
+    color: #00ff9c;
+    font-family: monospace;
+    text-align: center;
+}
+
+.safe {
+    border: 2px solid #00ff9c;
+    padding: 10px;
+}
+
+.attack {
+    border: 2px solid red;
+    color: red;
+}
+
+.logs {
+    height: 200px;
+    background: black;
+    overflow-y: scroll;
+    padding: 10px;
+}

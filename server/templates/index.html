@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network IDS - Intrusion Detection System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        body { background: linear-gradient(135deg, #0f172a 0%, #1e2937 100%); }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-5px); }
+    </style>
+</head>
+<body class="min-h-screen text-white">
+    <div class="max-w-4xl mx-auto py-12 px-6">
+        <div class="text-center mb-10">
+            <h1 class="text-5xl font-bold mb-3 flex items-center justify-center gap-3">
+                <i class="fas fa-shield-alt text-cyan-400"></i>
+                Network IDS
+            </h1>
+            <p class="text-xl text-gray-300">Real-time Intrusion Detection using Machine Learning</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Input Form -->
+            <div class="card bg-slate-800/80 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-slate-700">
+                <h2 class="text-2xl font-semibold mb-6 flex items-center gap-2">
+                    <i class="fas fa-network-wired"></i> Flow Features
+                </h2>
+                
+                <form id="predictForm" class="space-y-5">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Destination Port</label>
+                            <input type="number" id="Destination Port" value="80" 
+                                   class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-400">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Flow Duration (ms)</label>
+                            <input type="number" id="Flow Duration" value="100000" 
+                                   class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-400">
+                        </div>
+                    </div>
+
+                    <!-- Add more important fields (you can expand this) -->
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Flow Bytes/s</label>
+                        <input type="number" step="0.01" id="Flow Bytes/s" value="5000" 
+                               class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-400">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Total Fwd Packets</label>
+                            <input type="number" id="Total Fwd Packets" value="10" 
+                                   class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-400">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Total Bwd Packets</label>
+                            <input type="number" id="Total Backward Packets" value="8" 
+                                   class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-400">
+                        </div>
+                    </div>
+
+                    <button type="submit"
+                            class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 transition">
+                        <i class="fas fa-bolt"></i>
+                        Predict Traffic Type
+                    </button>
+                </form>
+            </div>
+
+            <!-- Result Panel -->
+            <div class="card bg-slate-800/80 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-slate-700 flex flex-col">
+                <h2 class="text-2xl font-semibold mb-6">Prediction Result</h2>
+                
+                <div id="resultArea" class="flex-1 flex items-center justify-center text-center">
+                    <div id="defaultState" class="space-y-4">
+                        <i class="fas fa-shield-alt text-6xl text-gray-500"></i>
+                        <p class="text-gray-400">Enter flow features and click Predict</p>
+                    </div>
+
+                    <div id="resultContent" class="hidden w-full">
+                        <div id="statusIcon" class="text-7xl mb-6"></div>
+                        <div id="predictionText" class="text-4xl font-bold mb-2"></div>
+                        <div id="statusBadge" class="inline-block px-6 py-2 rounded-full text-sm font-medium"></div>
+                    </div>
+                </div>
+
+                <div id="details" class="mt-8 text-sm text-gray-400 hidden">
+                    <p class="font-mono text-xs break-all" id="rawResponse"></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center mt-10 text-gray-500 text-sm">
+            Powered by Flask + Machine Learning • Intrusion Detection System
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('predictForm');
+        const resultContent = document.getElementById('resultContent');
+        const defaultState = document.getElementById('defaultState');
+        const predictionText = document.getElementById('predictionText');
+        const statusIcon = document.getElementById('statusIcon');
+        const statusBadge = document.getElementById('statusBadge');
+        const rawResponse = document.getElementById('rawResponse');
+        const details = document.getElementById('details');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Collect all input values
+            const inputs = {};
+            document.querySelectorAll('input').forEach(input => {
+                inputs[input.id] = parseFloat(input.value) || 0;
+            });
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(inputs)
+                });
+
+                const data = await response.json();
+
+                defaultState.classList.add('hidden');
+                resultContent.classList.remove('hidden');
+
+                if (data.prediction === "ATTACK") {
+                    statusIcon.innerHTML = '⚠️';
+                    predictionText.textContent = 'ATTACK DETECTED';
+                    predictionText.className = 'text-4xl font-bold mb-2 text-red-400';
+                    statusBadge.className = 'inline-block px-6 py-2 rounded-full text-sm font-medium bg-red-500/20 text-red-400 border border-red-500';
+                    statusBadge.textContent = 'MALICIOUS TRAFFIC';
+                } else {
+                    statusIcon.innerHTML = '✅';
+                    predictionText.textContent = 'BENIGN';
+                    predictionText.className = 'text-4xl font-bold mb-2 text-emerald-400';
+                    statusBadge.className = 'inline-block px-6 py-2 rounded-full text-sm font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500';
+                    statusBadge.textContent = 'NORMAL TRAFFIC';
+                }
+
+                rawResponse.textContent = JSON.stringify(data, null, 2);
+                details.classList.remove('hidden');
+
+            } catch (error) {
+                alert('Error connecting to server: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>

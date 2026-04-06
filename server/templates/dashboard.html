@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IDS Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>IDS Dashboard</h1>
+    <div id="status-box">Monitoring...</div>
+    
+    <p>Flow Duration: <span id="flow-duration">0</span></p>
+    <p>Bytes/s: <span id="flow-bytes">0</span></p>
+    <p>Packets/s: <span id="flow-pkts">0</span></p>
+    
+    <p><b>Logs</b></p>
+    <div id="logs"></div>
+
+    <script>
+        async function fetchLiveData() {
+            const response = await fetch('/live-data');
+            const data = await response.json();
+
+            document.getElementById('flow-duration').innerText = data["Flow Duration"];
+            document.getElementById('flow-bytes').innerText = data["Flow Bytes/s"];
+            document.getElementById('flow-pkts').innerText = data["Flow Packets/s"];
+
+            // Optional: send to /predict
+            const predResponse = await fetch('/predict', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const predData = await predResponse.json();
+            document.getElementById('status-box').innerText = predData.prediction;
+
+            const logs = document.getElementById('logs');
+            const logEntry = document.createElement('p');
+            logEntry.innerText = `Flow: ${data["Flow Duration"]}, ${data["Flow Bytes/s"]}, ${data["Flow Packets/s"]} -> ${predData.prediction}`;
+            logs.prepend(logEntry);
+        }
+
+        // Fetch every 1 second
+        setInterval(fetchLiveData, 1000);
+    </script>
+</body>
+</html>
