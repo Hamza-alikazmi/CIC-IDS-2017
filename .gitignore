@@ -14,4 +14,4 @@ Cleaned_CSVs/combined.csv
 *.zip
 server/__pycache__/
 server/nids.log
-server/venv/
+server/
