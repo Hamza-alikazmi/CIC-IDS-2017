@@ -1,6 +1,6 @@
 import joblib
 import pandas as pd
-import numpy as np
+
 
 # Load trained model
 model = joblib.load("ids_model.pkl")

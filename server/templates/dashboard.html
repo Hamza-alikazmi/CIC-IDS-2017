@@ -40,6 +40,24 @@
     </style>
 </head>
 <body class="bg-bgDark text-white font-sans h-screen p-5 flex flex-col box-border overflow-hidden">
+    
+    <div class="bg-panelBg border border-borderGray rounded-lg p-4 mb-5 flex items-center gap-4">
+        <select id="interfaceSelect" class="bg-bgDark border border-borderGray p-2 rounded text-white min-w-[200px]">
+            <option>Loading interfaces...</option>
+        </select>
+
+        <button onclick="startMonitoring()" id="btnStart"
+            class="bg-accentGreen hover:bg-accentGreen/80 transition text-black px-4 py-2 rounded font-semibold">
+            Start Monitoring
+        </button>
+
+        <button onclick="stopMonitoring()" id="btnStop" disabled
+            class="bg-accentRed hover:bg-accentRed/80 transition text-white px-4 py-2 rounded font-semibold opacity-50 cursor-not-allowed">
+            Stop
+        </button>
+
+        <span id="currentInterface" class="text-textGray ml-4 font-mono"></span>
+    </div>
 
     <div id="statusBanner" class="p-4 rounded-lg flex justify-between items-center border-2 mb-5 transition-all duration-300 border-accentGreen bg-accentGreen/10">
         <div id="statusTitle" class="text-2xl font-bold text-accentGreen flex items-center gap-3">
@@ -66,7 +84,6 @@
     </div>
 
     <div class="grid grid-cols-3 grid-rows-[auto_1fr] gap-5 flex-1 min-h-0">
-        
         <div class="bg-panelBg border border-borderGray rounded-lg p-4 flex flex-col col-span-2 row-span-1 shadow-lg">
             <h3 class="m-0 mb-4 text-gray-300 text-lg border-b border-borderGray pb-2 flex items-center gap-2">
                 <i class="fas fa-chart-area"></i> Live Network Traffic (Packets/s)
@@ -99,8 +116,7 @@
                             <th class="text-textGray p-2 font-normal">Status</th>
                         </tr>
                     </thead>
-                    <tbody id="flowBody">
-                        </tbody>
+                    <tbody id="flowBody"></tbody>
                 </table>
             </div>
         </div>
@@ -112,11 +128,9 @@
     let isUnderAttack = false;
     let currentAlertCount = 0;
 
-    // Tailwind State Classes
     const safeBannerClass = "p-4 rounded-lg flex justify-between items-center border-2 mb-5 transition-all duration-300 border-accentGreen bg-accentGreen/10";
     const attackBannerClass = "p-4 rounded-lg flex justify-between items-center border-2 mb-5 transition-all duration-300 border-accentRed bg-accentRed/10 shadow-[0_0_15px_rgba(255,75,43,0.2)]";
 
-    // Initialize Chart
     const ctx = document.getElementById('trafficChart').getContext('2d');
     const trafficChart = new Chart(ctx, {
         type: 'line',
@@ -157,7 +171,6 @@
         isUnderAttack = false;
         currentAlertCount = 0;
         
-        // Reset UI with Tailwind classes
         document.getElementById("statusBanner").className = safeBannerClass;
         document.getElementById("statusTitle").innerHTML = `<i class="fas fa-shield-check"></i> SYSTEM SECURE`;
         document.getElementById("statusTitle").className = "text-2xl font-bold text-accentGreen flex items-center gap-3";
@@ -166,7 +179,6 @@
         document.getElementById("incidentStats").classList.add("hidden");
         document.getElementById("btnResolve").classList.add("hidden");
         
-        // Reset Chart Color
         trafficChart.data.datasets[0].borderColor = '#00ff9c';
         trafficChart.data.datasets[0].backgroundColor = 'rgba(0, 255, 156, 0.05)';
         trafficChart.update();
@@ -185,16 +197,13 @@
         // 2. Update Flow Table
         const tbody = document.getElementById("flowBody");
         const row = tbody.insertRow(0); 
-        
-        // Tailwind text coloring based on status
         row.className = isAttack ? "text-accentRed" : "text-accentGreen";
-        
         row.innerHTML = `
-            <td class="p-2 border-b border-borderGray/50">${data.src_ip}:${data.src_port}</td>
+            <td class="p-2 border-b border-borderGray/50">${data.src_ip}:${data.src_port || 0}</td>
             <td class="p-2 border-b border-borderGray/50"><i class="fas fa-arrow-right opacity-50 text-xs"></i></td>
-            <td class="p-2 border-b border-borderGray/50">${data.dst_ip}:${data.dst_port}</td>
+            <td class="p-2 border-b border-borderGray/50">${data.dst_ip}:${data.dst_port || 0}</td>
             <td class="p-2 border-b border-borderGray/50">${data.protocol}</td>
-            <td class="p-2 border-b border-borderGray/50">${(data["Flow Duration"]).toFixed(1)} ms</td>
+            <td class="p-2 border-b border-borderGray/50">${(data["Flow Duration"] || 0).toFixed(1)} ms</td>
             <td class="p-2 border-b border-borderGray/50 font-bold">${data.prediction}</td>
         `;
 
@@ -206,7 +215,6 @@
                 isUnderAttack = true;
                 currentAlertCount = 0;
                 
-                // Switch UI to Attack Mode using Tailwind classes
                 document.getElementById("statusBanner").className = attackBannerClass;
                 document.getElementById("statusTitle").innerHTML = `<i class="fas fa-exclamation-triangle"></i> THREAT DETECTED`;
                 document.getElementById("statusTitle").className = "text-2xl font-bold text-accentRed flex items-center gap-3";
@@ -218,18 +226,92 @@
                 document.getElementById("incType").innerText = data.prediction;
                 document.getElementById("incIp").innerText = data.src_ip;
                 
-                // Change Chart Color to Red
                 trafficChart.data.datasets[0].borderColor = '#ff4b2b';
                 trafficChart.data.datasets[0].backgroundColor = 'rgba(255, 75, 43, 0.1)';
                 
                 log(`CRITICAL: ${data.prediction} detected from ${data.src_ip}`, true);
             }
             
-            // Increment Alerts
             currentAlertCount++;
             document.getElementById("incAlerts").innerText = currentAlertCount;
         }
     });
+
+    // --- THESE FUNCTIONS ARE NOW CORRECTLY OUTSIDE THE SOCKET LISTENER ---
+    
+    async function loadInterfaces() {
+        try {
+            const res = await fetch("/interfaces");
+            const data = await res.json();
+            const select = document.getElementById("interfaceSelect");
+            select.innerHTML = "";
+
+            data.forEach(iface => {
+                const option = document.createElement("option");
+                option.value = iface;
+                option.textContent = iface;
+                select.appendChild(option);
+            });
+            log(`Loaded ${data.length} interfaces`);
+        } catch (err) {
+            console.error("Failed to load interfaces", err);
+            log("Failed to load interfaces from server", true);
+        }
+    }
+
+    async function startMonitoring() {
+        const iface = document.getElementById("interfaceSelect").value;
+        if (!iface) return;
+
+        try {
+            const res = await fetch("/start", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ interface: iface })
+            });
+            const data = await res.json();
+
+            if (data.status === "started") {
+                log(`Monitoring started on ${data.interface}`);
+                document.getElementById("currentInterface").innerText = "Active: " + data.interface;
+                
+                // Toggle buttons
+                document.getElementById("btnStart").disabled = true;
+                document.getElementById("btnStart").classList.add("opacity-50", "cursor-not-allowed");
+                document.getElementById("btnStop").disabled = false;
+                document.getElementById("btnStop").classList.remove("opacity-50", "cursor-not-allowed");
+                document.getElementById("interfaceSelect").disabled = true;
+            } else {
+                log("Failed to start monitoring: " + data.status, true);
+            }
+        } catch (err) {
+            log("Server error starting monitor", true);
+        }
+    }
+
+    async function stopMonitoring() {
+        try {
+            const res = await fetch("/stop", { method: "POST" });
+            const data = await res.json();
+
+            log("Monitoring stopped");
+            document.getElementById("currentInterface").innerText = "Stopped";
+            
+            // Toggle buttons
+            document.getElementById("btnStart").disabled = false;
+            document.getElementById("btnStart").classList.remove("opacity-50", "cursor-not-allowed");
+            document.getElementById("btnStop").disabled = true;
+            document.getElementById("btnStop").classList.add("opacity-50", "cursor-not-allowed");
+            document.getElementById("interfaceSelect").disabled = false;
+        } catch (err) {
+            log("Server error stopping monitor", true);
+        }
+    }
+
+    // Auto-load interfaces on page startup
+    window.onload = async () => {
+        await loadInterfaces();
+    };
 </script>
 </body>
 </html>

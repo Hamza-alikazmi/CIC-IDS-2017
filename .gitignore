@@ -12,3 +12,6 @@ Cleaned_CSVs/cleaned_Tuesday-WorkingHours.pcap_ISCX.csv
 Cleaned_CSVs/cleaned_Wednesday-workingHours.pcap_ISCX.csv
 Cleaned_CSVs/combined.csv
 *.zip
+server/__pycache__/
+server/nids.log
+server/venv/

@@ -1,83 +1,86 @@
 import time
-from scapy.all import sniff, TCP, IP, UDP
+import psutil
+from scapy.all import sniff, TCP, IP, UDP, get_if_list
 from collections import defaultdict, deque
 import numpy as np
-from detector import FEATURES, predict_flow
 from flask import Flask, jsonify, request, render_template
 import threading
 from flask_socketio import SocketIO
+import joblib
+import pandas as pd
+
+# Load trained model
+model = joblib.load("ids_model.pkl")
+
+FEATURES = [
+    "Destination Port","Flow Duration","Flow Bytes/s","Flow Packets/s",
+    "Total Fwd Packets","Total Backward Packets",
+    "Total Length of Fwd Packets","Total Length of Bwd Packets",
+    "Fwd Packet Length Mean","Fwd Packet Length Std",
+    "Bwd Packet Length Mean","Bwd Packet Length Std",
+    "Packet Length Mean","Packet Length Std",
+    "Flow IAT Mean","Flow IAT Std",
+    "Fwd IAT Mean","Fwd IAT Std",
+    "Bwd IAT Mean","Bwd IAT Std",
+    "Fwd Packets/s","Bwd Packets/s",
+    "Fwd Header Length","Bwd Header Length",
+    "SYN Flag Count","ACK Flag Count","PSH Flag Count",
+    "RST Flag Count","FIN Flag Count",
+    "Average Packet Size","Avg Fwd Segment Size","Avg Bwd Segment Size",
+    "Subflow Fwd Packets","Subflow Fwd Bytes",
+    "Subflow Bwd Packets","Subflow Bwd Bytes",
+    "Init_Win_bytes_forward","Init_Win_bytes_backward",
+    "Active Mean","Active Std","Idle Mean","Idle Std"
+]
+
+def predict_flow(flow_dict):
+    # Convert dict to list in FEATURE order
+    flow_array = [flow_dict[f] for f in FEATURES]  # list of 42 values
+    df = pd.DataFrame([flow_array], columns=FEATURES)
+    prediction = model.predict(df)[0]
+    return prediction
+
+
 # -------------------------------
-# Flow storage
+# Flow storage & Globals
 # -------------------------------
-flows = defaultdict(lambda: deque(maxlen=1000))  # store last 1000 packets per flow
-latest_features = None
-latest_prediction = "BENIGN"
-
-latest_result = {
-    "Flow Bytes/s": 0,
-    "Flow Duration": 0,
-    "Flow Packets/s": 0,
-    "prediction": "BENIGN"
-}
-
-
+flows = defaultdict(lambda: deque(maxlen=1000))
 last_emit_time = 0 
+sniff_thread = None
+stop_sniff_flag = False
 
-# Add these globals
+# -------------------------------
+# Interface Helpers
+# -------------------------------
+def get_active_interfaces():
+    interfaces = []
+    blacklist = ["lo", "docker", "virbr", "veth", "loopback"]
+    try:
+        for iface in get_if_list():
+            if not any(b in iface.lower() for b in blacklist):
+                interfaces.append(iface)
+    except Exception:
+        pass
 
-stats_buffer = {
+    if not interfaces:
+        stats = psutil.net_if_stats()
+        for iface, stat in stats.items():
+            if stat.isup and not any(b in iface.lower() for b in blacklist):
+                interfaces.append(iface)
+    return list(set(interfaces))
 
-    "packets": 0,
-
-    "bytes": 0,
-
-    "latest_pred": "BENIGN",
-
-    "last_flow": {}
-
-}
-
-
-def emit_loop():
-
-    """Background thread to send updates once per second"""
-
-    global stats_buffer
-
-    while True:
-
-        time.sleep(1) # Wait 1 second
-
-        if stats_buffer["packets"] > 0:
-
-            # Emit the aggregated stats
-
-            socketio.emit("new_prediction", {
-
-                "Flow Packets/s": stats_buffer["packets"],
-
-                "Flow Bytes/s": stats_buffer["bytes"],
-
-                "prediction": stats_buffer["latest_pred"],
-
-                "details": stats_buffer["last_flow"]
-
-            })
-
-            # Reset buffer for the next second
-
-            stats_buffer["packets"] = 0
-
-            stats_buffer["bytes"] = 0
-
+def auto_select_interface():
+    active = get_active_interfaces()
+    for iface in active:
+        if any(keyword in iface.lower() for keyword in ["wl", "eth", "wi-fi", "ethernet"]):
+            return iface
+    return active[0] if active else None
 
 # -------------------------------
 # Feature extraction
 # -------------------------------
 def extract_features(flow_packets):
-    if not flow_packets:
-        return None
-
+    if not flow_packets: return None
     packets = flow_packets
     total_fwd = sum(1 for p in packets if p['dir'] == 'fwd')
     total_bwd = sum(1 for p in packets if p['dir'] == 'bwd')
@@ -156,14 +159,13 @@ def extract_features(flow_packets):
         "Idle Mean": safe_mean(idle_times),
         "Idle Std": safe_std(idle_times)
     }
-
     return features
 
 # -------------------------------
 # Packet processing
 # -------------------------------
 def process_packet(pkt):
-    global latest_result, last_emit_time # Add last_emit_time here
+    global last_emit_time
 
     if IP not in pkt:
         return
@@ -181,13 +183,8 @@ def process_packet(pkt):
     flow_key = (src, dst, src_port, dst_port, proto)
 
     flows[flow_key].append({
-        'time': pkt.time,
-        'len': len(pkt),
-        'dir': direction,
-        'window': window,
-        'flags': flags,
-        'src_port': src_port,
-        'dst_port': dst_port
+        'time': pkt.time, 'len': len(pkt), 'dir': direction,
+        'window': window, 'flags': flags, 'src_port': src_port, 'dst_port': dst_port
     })
 
     features = extract_features(flows[flow_key])
@@ -196,9 +193,6 @@ def process_packet(pkt):
         try:
             pred = predict_flow(features)
             
-            # Print to backend console for debugging
-            print(f"[+] Flow {flow_key} -> {pred}")
-
             latest_result = {
                 "src_ip": src,
                 "dst_ip": dst,
@@ -206,50 +200,65 @@ def process_packet(pkt):
                 "dst_port": dst_port,
                 "protocol": "TCP" if TCP in pkt else "UDP" if UDP in pkt else "Other",
                 "Flow Bytes/s": features.get("Flow Bytes/s", 0),
-                "Flow Duration": features.get("Flow Duration", 0), 
+                "Flow Duration": features.get("Flow Duration", 0) * 1000, 
                 "Flow Packets/s": features.get("Flow Packets/s", 0),
                 "prediction": pred
             }
 
             current_time = time.time()
             
-            # 🔥 THE FIX: Emit immediately if it's an attack, OR if 0.5 seconds have passed
+            # Always emit if it is an attack, OR if 0.5 seconds have passed (for smooth graph)
             if pred != "BENIGN" or (current_time - last_emit_time > 0.5):
                 socketio.emit("new_prediction", latest_result)
                 last_emit_time = current_time
 
         except Exception as e:
-            print(f"Prediction error: {e}")
+            pass
 
 # -------------------------------
-# Flask API
+# Flask API Routes
 # -------------------------------
-app = Flask(__name__)
-
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
-
-# @app.route("/predict", methods=["POST"])
-# def predict():
-#     global latest_result
-#     return jsonify(latest_result), 200
 
 @app.route("/", methods=["GET"])
 def get_flows():
     return render_template("dashboard.html")    
-# -------------------------------
-# Run sniffing in background thread
-# -------------------------------
-if __name__ == "__main__":
-    print("[*] Starting IDS...")
 
+@app.route("/interfaces", methods=["GET"])
+def interfaces():
+    try:
+        return jsonify(get_active_interfaces())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/start", methods=["POST"])
+def start_sniff():
+    global sniff_thread, stop_sniff_flag
+    iface = request.json.get("interface") or auto_select_interface()
+    
+    if sniff_thread and sniff_thread.is_alive():
+        return jsonify({"status": "already running"})
+
+    stop_sniff_flag = False
     sniff_thread = threading.Thread(target=lambda: sniff(
-        iface="wlxe009bf682ec1",
-        prn=process_packet,
-        store=0
+        iface=iface, prn=process_packet, store=0, stop_filter=lambda x: stop_sniff_flag
     ))
     sniff_thread.daemon = True
     sniff_thread.start()
+    return jsonify({"status": "started", "interface": iface})
 
+@app.route("/stop", methods=["POST"])
+def stop_sniff():
+    global sniff_thread, stop_sniff_flag
+    if sniff_thread and sniff_thread.is_alive():
+        stop_sniff_flag = True 
+        sniff_thread.join(timeout=2.0) 
+        sniff_thread = None
+        return jsonify({"status": "stopped"})
+    return jsonify({"status": "not running"})
+
+if __name__ == "__main__":
+    print("[*] Starting IDS Server...")
     print("[*] Flask running with WebSocket at http://localhost:5000")
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=False)
