@@ -8,9 +8,39 @@ import threading
 from flask_socketio import SocketIO
 import joblib
 import pandas as pd
+from pathlib import Path
+# -------------------------------
+# 🛡️ SOC Logging Configuration
+# -------------------------------
+import os
+import logging
+
+# AppImages are read-only. We MUST write logs to a writable directory on the host.
+HOME_DIR = os.path.expanduser("~")
+APP_DIR = os.path.join(HOME_DIR, ".nids_app")
+
+# Create the directory if it doesn't exist
+if not os.path.exists(APP_DIR):
+    os.makedirs(APP_DIR)
+
+log_file_path = os.path.join(APP_DIR, 'nids.log')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - NIDS_CORE - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Load trained model
-model = joblib.load("ids_model.pkl")
+BASE_DIR = Path(__file__).resolve().parent
+
+# Load the model relative to server.py
+model_path = BASE_DIR / "ids_model.pkl"
+model = joblib.load(model_path)
 
 FEATURES = [
     "Destination Port","Flow Duration","Flow Bytes/s","Flow Packets/s",
@@ -207,6 +237,10 @@ def process_packet(pkt):
 
             current_time = time.time()
             
+            # 🛡️ SOC Logging: Log the exact attack details to the file
+            if pred != "BENIGN":
+                logger.warning(f"THREAT DETECTED: Type='{pred}', Source={src}:{src_port}, Target={dst}:{dst_port}, Proto={latest_result['protocol']}")
+
             # Always emit if it is an attack, OR if 0.5 seconds have passed (for smooth graph)
             if pred != "BENIGN" or (current_time - last_emit_time > 0.5):
                 socketio.emit("new_prediction", latest_result)
@@ -219,7 +253,7 @@ def process_packet(pkt):
 # Flask API Routes
 # -------------------------------
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*",async_mode='threading')
 
 @app.route("/", methods=["GET"])
 def get_flows():
@@ -228,8 +262,11 @@ def get_flows():
 @app.route("/interfaces", methods=["GET"])
 def interfaces():
     try:
-        return jsonify(get_active_interfaces())
+        ifaces = get_active_interfaces()
+        logger.info(f"Loaded {len(ifaces)} network interfaces.")
+        return jsonify(ifaces)
     except Exception as e:
+        logger.error(f"Failed to load interfaces: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/start", methods=["POST"])
@@ -246,6 +283,8 @@ def start_sniff():
     ))
     sniff_thread.daemon = True
     sniff_thread.start()
+    
+    logger.info(f"Started network monitoring on interface: {iface}")
     return jsonify({"status": "started", "interface": iface})
 
 @app.route("/stop", methods=["POST"])
@@ -255,10 +294,13 @@ def stop_sniff():
         stop_sniff_flag = True 
         sniff_thread.join(timeout=2.0) 
         sniff_thread = None
+        
+        logger.info("Network monitoring stopped by user.")
         return jsonify({"status": "stopped"})
     return jsonify({"status": "not running"})
 
 if __name__ == "__main__":
+    logger.info("Starting NIDS Server Framework...")
     print("[*] Starting IDS Server...")
     print("[*] Flask running with WebSocket at http://localhost:5000")
     socketio.run(app, debug=False)

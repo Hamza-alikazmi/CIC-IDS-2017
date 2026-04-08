@@ -15,3 +15,14 @@ Cleaned_CSVs/combined.csv
 server/__pycache__/
 server/nids.log
 server/
+build/
+dist/
+*.egg-info/
+*.spec
+*.zip
+NIDS.AppDir/
+build_deb/
+dist_deb/
+appimagetool
+*.AppImage
+*.deb

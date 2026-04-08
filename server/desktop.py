@@ -73,9 +73,8 @@ class NIDSDesktopApp(QMainWindow):
         self.flask_thread.server_started.connect(self.on_server_started)
 
         # Determine log path dynamically based on script location
-        self.log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server', 'nids.log')
-        if not os.path.exists(self.log_path):
-            self.log_path = 'nids.log' # Fallback to current directory
+        HOME_DIR = os.path.expanduser("~")
+        self.log_path = os.path.join(HOME_DIR, ".nids_app", "nids.log") # Fallback to current directory
 
         self.init_ui()
         self.start_flask_server()
