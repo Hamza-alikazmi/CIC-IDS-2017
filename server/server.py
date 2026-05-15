@@ -82,22 +82,50 @@ stop_sniff_flag = False
 # -------------------------------
 # Interface Helpers
 # -------------------------------
-def get_active_interfaces():
-    interfaces = []
-    blacklist = ["lo", "docker", "virbr", "veth", "loopback"]
-    try:
-        for iface in get_if_list():
-            if not any(b in iface.lower() for b in blacklist):
-                interfaces.append(iface)
-    except Exception:
-        pass
+# -------------------------------
+# Interface Helpers
+# -------------------------------
+import socket
 
-    if not interfaces:
-        stats = psutil.net_if_stats()
-        for iface, stat in stats.items():
-            if stat.isup and not any(b in iface.lower() for b in blacklist):
-                interfaces.append(iface)
-    return list(set(interfaces))
+def get_active_interfaces():
+
+    interfaces = []
+
+    stats = psutil.net_if_stats()
+    addrs = psutil.net_if_addrs()
+
+    print("\n===== DEBUGGING INTERFACES =====")
+
+    for iface, stat in stats.items():
+
+        print(f"\nInterface: {iface}")
+        print(f"UP: {stat.isup}")
+
+        if iface in addrs:
+
+            for addr in addrs[iface]:
+
+                print("ADDR:", addr.family, addr.address)
+
+        interfaces.append(iface)
+
+    print("================================\n")
+
+    return interfaces
+
+
+def auto_select_interface():
+    active = get_active_interfaces()
+
+    for iface in active:
+        if iface.startswith("wl"):
+            return iface
+
+    for iface in active:
+        if iface.startswith("en"):
+            return iface
+
+    return active[0] if active else None
 
 def auto_select_interface():
     active = get_active_interfaces()
@@ -263,11 +291,17 @@ def get_flows():
 def interfaces():
     try:
         ifaces = get_active_interfaces()
+
+        print("Detected interfaces:", ifaces)
+
         logger.info(f"Loaded {len(ifaces)} network interfaces.")
         return jsonify(ifaces)
+
     except Exception as e:
+        print(e)
         logger.error(f"Failed to load interfaces: {str(e)}")
         return jsonify({"error": str(e)}), 500
+        
 
 @app.route("/start", methods=["POST"])
 def start_sniff():
