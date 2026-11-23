@@ -15,3 +15,12 @@ The video demonstrates the CIC-IDS-2017 network intrusion detection system and d
 
 - Training set score: **0.9984**
 - Test set score: **0.9984**
+
+### Model notes
+
+- Model: **LightGBM classifier**
+- Model input: **42 features**
+- Training score: **0.9984**
+- Test score: **0.9984**
+- The 21st-ranked feature is **`Bwd IAT Std`**. It is not assigned zero automatically; missing live values default to zero only.
+- Features ranked after the top 20 remain included in the 42-feature model input and must not be removed without retraining.

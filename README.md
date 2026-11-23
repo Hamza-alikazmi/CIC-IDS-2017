@@ -127,43 +127,41 @@ Check configuration through `GET /status`.
 
 ## Model performance
 
-The intrusion detection model is a Random Forest classifier trained on the CIC-IDS-2017 network flow dataset.
+The trained intrusion detection model loaded from `server/ids_model.pkl` is a **LightGBM classifier** trained on the CIC-IDS-2017 network flow dataset.
 
 - **Training set score:** 0.9984 (99.84%)
 - **Test set score:** 0.9984 (99.84%)
+- **Model input size:** 42 features
 
 The consistent training and test scores indicate strong classification performance without a substantial score gap in this evaluation.
 
+### Feature handling and the 21st feature
+
+The live server passes all 42 model features in the feature order defined in `server/server.py`. Missing features are defaulted to `0` by `flow_dict.get(feature, 0)`. This is not the same as feature selection: omitting or removing the 21st feature would be incorrect because the loaded model expects 42 columns.
+
+According to the loaded model's `feature_importances_`, the 21st most important feature is **`Bwd IAT Std`**. It is calculated from backward inter-arrival times and is passed normally; it is **not automatically assigned zero** during live prediction.
+
+Several features can naturally be zero in an individual flow, while `Fwd Header Length` and `Bwd Header Length` are currently hardcoded to `0` by the live feature extractor. The loaded model also reports these features as having zero importance:
+
+- `RST Flag Count`
+- `Avg Fwd Segment Size`
+- `Avg Bwd Segment Size`
+- `Subflow Fwd Packets`
+- `Subflow Fwd Bytes`
+- `Subflow Bwd Packets`
+- `Subflow Bwd Bytes`
+
+These values should not be removed or re-arranged unless the model is retrained with the reduced feature set. The feature-importance chart should be interpreted as a ranking, not as evidence that a later feature is automatically replaced with zero by the prediction code.
+
 ### Confusion matrix
 
-The confusion matrix below compares the true traffic labels with the labels predicted by the Random Forest model across BENIGN traffic and multiple attack categories.
+The confusion matrix below compares the true traffic labels with the labels predicted by the trained model across BENIGN traffic and multiple attack categories.
 
-![Random Forest confusion matrix](Demo/confusion%20matrix.png)
+![Model confusion matrix](Demo/confusion%20matrix.png)
 
 ### Top 20 selected features
 
-Feature selection identified the following flow attributes as the most influential for model predictions:
-
-- Destination Port
-- Init_Win_bytes_backward
-- Total Length of Bwd Packets
-- Subflow Bwd Bytes
-- Packet Length Mean
-- Bwd Packet Length Mean
-- Bwd Packets/s
-- Flow Duration
-- Fwd IAT Mean
-- Flow IAT Mean
-- Total Length of Fwd Packets
-- Init_Win_bytes_forward
-- Subflow Fwd Bytes
-- Fwd Header Length
-- Average Packet Size
-- Packet Length Std
-- Flow IAT Std
-- Fwd Packet Length Mean
-- Fwd IAT Std
-- Fwd Packets/s
+The following chart illustrates the top 20 features from the model analysis:
 
 ![Top 20 influential network features](Demo/Top%2020%20features.png)
 
