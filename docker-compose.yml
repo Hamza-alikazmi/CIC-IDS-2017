@@ -1,0 +1,22 @@
+services:
+  cic-ids:
+    build:
+      context: .
+    container_name: cic-ids-nids
+    ports:
+      - "5000:5000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5000
+      WAZUH_ENABLED: "${WAZUH_ENABLED:-false}"
+      WAZUH_HOST: "${WAZUH_HOST:-wazuh.manager}"
+      WAZUH_PORT: "${WAZUH_PORT:-514}"
+      WAZUH_PROTOCOL: "${WAZUH_PROTOCOL:-udp}"
+    volumes:
+      - cic-ids-logs:/tmp/.nids_app
+    network_mode: host
+    privileged: true
+    restart: unless-stopped
+
+volumes:
+  cic-ids-logs:

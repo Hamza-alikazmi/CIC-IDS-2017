@@ -1,4 +1,5 @@
 venv
+.venv
 uncleaned_csvs
 Cleaned_csvs/
 CLI Version server.zip

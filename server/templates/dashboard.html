@@ -41,22 +41,29 @@
 </head>
 <body class="bg-bgDark text-white font-sans h-screen p-5 flex flex-col box-border overflow-hidden">
     
-    <div class="bg-panelBg border border-borderGray rounded-lg p-4 mb-5 flex items-center gap-4">
+    <div class="bg-panelBg border border-borderGray rounded-lg p-4 mb-5 flex items-center gap-4 flex-wrap">
         <select id="interfaceSelect" class="bg-bgDark border border-borderGray p-2 rounded text-white min-w-[200px]">
             <option>Loading interfaces...</option>
         </select>
 
         <button onclick="startMonitoring()" id="btnStart"
-            class="bg-accentGreen hover:bg-accentGreen/80 transition text-black px-4 py-2 rounded font-semibold">
-            Start Monitoring
+            class="bg-accentGreen hover:bg-accentGreen/80 transition text-black px-4 py-2 rounded font-semibold flex items-center gap-2">
+            <i class="fas fa-play"></i> Start Monitoring
         </button>
 
         <button onclick="stopMonitoring()" id="btnStop" disabled
-            class="bg-accentRed hover:bg-accentRed/80 transition text-white px-4 py-2 rounded font-semibold opacity-50 cursor-not-allowed">
-            Stop
+            class="bg-accentRed hover:bg-accentRed/80 transition text-white px-4 py-2 rounded font-semibold opacity-50 cursor-not-allowed flex items-center gap-2">
+            <i class="fas fa-stop"></i> Stop
         </button>
 
-        <span id="currentInterface" class="text-textGray ml-4 font-mono"></span>
+        <span id="currentInterface" class="text-textGray font-mono"></span>
+
+        <div class="ml-auto flex items-center gap-3">
+            <button onclick="openWhitelistModal()" id="btnWhitelist"
+                class="bg-bgDark hover:bg-borderGray border border-borderGray text-gray-200 px-3 py-2 rounded text-sm font-semibold transition flex items-center gap-2">
+                <i class="fas fa-shield-alt text-accentGreen"></i> Trusted Whitelist <span id="wlCountBadge" class="bg-accentGreen/20 text-accentGreen px-1.5 py-0.5 rounded text-xs">Active</span>
+            </button>
+        </div>
     </div>
 
     <div id="statusBanner" class="p-4 rounded-lg flex justify-between items-center border-2 mb-5 transition-all duration-300 border-accentGreen bg-accentGreen/10">
@@ -64,7 +71,7 @@
             <i class="fas fa-shield-check"></i> SYSTEM SECURE - MONITORING TRAFFIC
         </div>
         
-        <div class="hidden gap-8 items-center text-lg" id="incidentStats">
+        <div class="hidden gap-8 items-center text-lg flex-wrap" id="incidentStats">
             <div class="flex flex-col">
                 <span class="text-textGray text-sm">Threat Type</span>
                 <strong id="incType" class="font-mono text-xl">--</strong>
@@ -72,6 +79,15 @@
             <div class="flex flex-col">
                 <span class="text-textGray text-sm">Source IP</span>
                 <strong id="incIp" class="font-mono text-xl">--</strong>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-textGray text-sm">Attacker Attribution (WHOIS)</span>
+                <div class="flex items-center gap-2">
+                    <strong id="incOrg" class="font-mono text-lg text-yellow-400">Resolving...</strong>
+                    <button id="btnViewWhois" onclick="showWhoisModal(currentAttackIp)" class="text-xs bg-cyan-600/30 hover:bg-cyan-600/60 border border-cyan-500 text-cyan-300 px-2 py-1 rounded transition flex items-center gap-1 font-semibold">
+                        <i class="fas fa-search-location"></i> Trace
+                    </button>
+                </div>
             </div>
             <div class="flex flex-col">
                 <span class="text-textGray text-sm">Alerts Generated</span>
@@ -122,11 +138,125 @@
         </div>
     </div>
 
+    <!-- WHOIS Intelligence Modal -->
+    <div id="whoisModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-panelBg border border-borderGray rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col max-h-[88vh] text-left">
+            <div class="flex justify-between items-center border-b border-borderGray pb-3 mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-accentRed/20 text-accentRed rounded-lg">
+                        <i class="fas fa-search-location text-xl"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            WHOIS Threat Intelligence & Source Attribution
+                        </h3>
+                        <p class="text-xs text-textGray" id="whoisModalSubtitle">Investigating attacker IP identity</p>
+                    </div>
+                </div>
+                <button onclick="closeWhoisModal()" class="text-textGray hover:text-white text-xl p-1">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="bg-bgDark p-3 rounded border border-borderGray">
+                    <div class="text-[11px] uppercase tracking-wider text-textGray font-semibold">Source IP Address</div>
+                    <div id="whoisIp" class="font-mono font-bold text-accentRed text-sm mt-0.5 break-all">--</div>
+                    <div id="whoisHost" class="font-mono text-xs text-textGray mt-1 truncate" title="">--</div>
+                </div>
+                <div class="bg-bgDark p-3 rounded border border-borderGray">
+                    <div class="text-[11px] uppercase tracking-wider text-textGray font-semibold">Attributed Organization / ISP</div>
+                    <div id="whoisOrg" class="font-semibold text-yellow-400 text-sm mt-0.5 break-all">--</div>
+                    <div id="whoisCountry" class="text-xs text-textGray mt-1">--</div>
+                </div>
+                <div class="bg-bgDark p-3 rounded border border-borderGray">
+                    <div class="text-[11px] uppercase tracking-wider text-textGray font-semibold">Network Name</div>
+                    <div id="whoisNetName" class="font-mono text-xs text-gray-200 mt-0.5">--</div>
+                </div>
+                <div class="bg-bgDark p-3 rounded border border-borderGray">
+                    <div class="text-[11px] uppercase tracking-wider text-textGray font-semibold">Allocated IP Range / CIDR</div>
+                    <div id="whoisRange" class="font-mono text-xs text-gray-200 mt-0.5">--</div>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-xs text-textGray font-mono uppercase tracking-wider font-semibold">Raw WHOIS Response</span>
+                <button onclick="copyWhoisRaw()" class="text-xs text-textGray hover:text-white flex items-center gap-1 transition">
+                    <i class="fas fa-copy"></i> Copy Output
+                </button>
+            </div>
+            <pre id="whoisRaw" class="bg-logBg border border-borderGray rounded p-3 text-xs font-mono text-gray-300 overflow-y-auto flex-1 select-text max-h-60 leading-relaxed">Loading WHOIS intelligence...</pre>
+
+            <div class="flex justify-between items-center mt-4 pt-3 border-t border-borderGray">
+                <button id="btnWhitelistThis" onclick="whitelistCurrentWhoisIp()" class="bg-accentGreen/15 hover:bg-accentGreen/25 text-accentGreen border border-accentGreen/40 px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-2 transition">
+                    <i class="fas fa-shield-alt"></i> Add to Trusted Whitelist
+                </button>
+                <button onclick="closeWhoisModal()" class="bg-borderGray hover:bg-textGray hover:text-black text-white px-4 py-1.5 rounded text-xs font-semibold transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Whitelist Management Modal -->
+    <div id="whitelistModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-panelBg border border-borderGray rounded-xl max-w-xl w-full p-6 shadow-2xl flex flex-col max-h-[88vh] text-left">
+            <div class="flex justify-between items-center border-b border-borderGray pb-3 mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-accentGreen/20 text-accentGreen rounded-lg">
+                        <i class="fas fa-shield-alt text-xl"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Trusted Host Whitelist</h3>
+                        <p class="text-xs text-textGray">Prevents false alarms when security tools query Google DNS or trusted services</p>
+                    </div>
+                </div>
+                <button onclick="closeWhitelistModal()" class="text-textGray hover:text-white text-xl p-1">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="bg-bgDark p-3 rounded border border-borderGray mb-4">
+                <h4 class="text-xs font-bold text-textGray uppercase tracking-wider mb-2">Add Trusted Host / Resolver</h4>
+                <div class="flex gap-2">
+                    <input type="text" id="newWlIp" placeholder="e.g. 8.8.8.8" class="bg-panelBg border border-borderGray text-white text-xs px-3 py-2 rounded font-mono w-40 focus:outline-none focus:border-accentGreen">
+                    <input type="text" id="newWlDesc" placeholder="e.g. Google Public DNS" class="bg-panelBg border border-borderGray text-white text-xs px-3 py-2 rounded flex-1 focus:outline-none focus:border-accentGreen">
+                    <button onclick="addWhitelistEntry()" class="bg-accentGreen hover:bg-accentGreen/80 text-black px-4 py-2 rounded text-xs font-bold transition flex items-center gap-1 shrink-0">
+                        <i class="fas fa-plus"></i> Add
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto mb-4 border border-borderGray rounded max-h-64">
+                <table class="w-full text-left font-mono text-xs">
+                    <thead class="bg-bgDark sticky top-0 border-b border-borderGray">
+                        <tr>
+                            <th class="p-2 text-textGray font-semibold">IP Address</th>
+                            <th class="p-2 text-textGray font-semibold">Service / Description</th>
+                            <th class="p-2 text-textGray text-right font-semibold">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="whitelistBody" class="divide-y divide-borderGray/50"></tbody>
+                </table>
+            </div>
+
+            <div class="flex justify-between items-center pt-2 border-t border-borderGray">
+                <span class="text-xs text-textGray">Requests matching these IPs are classified as BENIGN and will not trigger alerts.</span>
+                <button onclick="closeWhitelistModal()" class="bg-borderGray hover:bg-textGray hover:text-black text-white px-4 py-1.5 rounded text-xs font-semibold transition shrink-0 ml-4">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
 <script>
     const socket = io();
     
     let isUnderAttack = false;
     let currentAlertCount = 0;
+    const whoisCache = {};
+    let currentAttackIp = null;
+    let activeModalIp = null;
 
     const safeBannerClass = "p-4 rounded-lg flex justify-between items-center border-2 mb-5 transition-all duration-300 border-accentGreen bg-accentGreen/10";
     const attackBannerClass = "p-4 rounded-lg flex justify-between items-center border-2 mb-5 transition-all duration-300 border-accentRed bg-accentRed/10 shadow-[0_0_15px_rgba(255,75,43,0.2)]";
@@ -170,6 +300,7 @@
         log(`Analyst cleared alert. Total incident alerts: ${currentAlertCount}`);
         isUnderAttack = false;
         currentAlertCount = 0;
+        currentAttackIp = null;
         
         document.getElementById("statusBanner").className = safeBannerClass;
         document.getElementById("statusTitle").innerHTML = `<i class="fas fa-shield-check"></i> SYSTEM SECURE`;
@@ -178,6 +309,7 @@
         document.getElementById("incidentStats").classList.remove("flex");
         document.getElementById("incidentStats").classList.add("hidden");
         document.getElementById("btnResolve").classList.add("hidden");
+        document.getElementById("incOrg").innerText = "--";
         
         trafficChart.data.datasets[0].borderColor = '#00ff9c';
         trafficChart.data.datasets[0].backgroundColor = 'rgba(0, 255, 156, 0.05)';
@@ -197,20 +329,44 @@
         // 2. Update Flow Table
         const tbody = document.getElementById("flowBody");
         const row = tbody.insertRow(0); 
-        row.className = isAttack ? "text-accentRed" : "text-accentGreen";
+        row.className = isAttack ? "text-accentRed" : (data.whitelisted ? "text-cyan-400" : "text-accentGreen");
+        
+        const statusHtml = data.whitelisted ? 
+            `BENIGN <span class="text-[10px] bg-accentGreen/20 text-accentGreen px-1.5 py-0.5 rounded border border-accentGreen/30 ml-1">WHITELISTED</span>` : 
+            data.prediction;
+
         row.innerHTML = `
-            <td class="p-2 border-b border-borderGray/50">${data.src_ip}:${data.src_port || 0}</td>
+            <td class="p-2 border-b border-borderGray/50">
+                <button onclick="showWhoisModal('${data.src_ip}')" class="hover:underline hover:text-cyan-300 text-left font-mono inline-flex items-center gap-1.5" title="Run WHOIS lookup">
+                    <i class="fas fa-search-location text-[10px] opacity-60"></i>${data.src_ip}:${data.src_port || 0}
+                </button>
+            </td>
             <td class="p-2 border-b border-borderGray/50"><i class="fas fa-arrow-right opacity-50 text-xs"></i></td>
-            <td class="p-2 border-b border-borderGray/50">${data.dst_ip}:${data.dst_port || 0}</td>
+            <td class="p-2 border-b border-borderGray/50">
+                <button onclick="showWhoisModal('${data.dst_ip}')" class="hover:underline hover:text-cyan-300 text-left font-mono" title="Run WHOIS lookup">
+                    ${data.dst_ip}:${data.dst_port || 0}
+                </button>
+            </td>
             <td class="p-2 border-b border-borderGray/50">${data.protocol}</td>
             <td class="p-2 border-b border-borderGray/50">${(data["Flow Duration"] || 0).toFixed(1)} ms</td>
-            <td class="p-2 border-b border-borderGray/50 font-bold">${data.prediction}</td>
+            <td class="p-2 border-b border-borderGray/50 font-bold">${statusHtml}</td>
         `;
 
         if (tbody.rows.length > 15) { tbody.deleteRow(15); }
 
         // 3. Incident Logic
         if (isAttack) {
+            currentAttackIp = data.src_ip;
+
+            if (data.whois && data.whois.org && data.whois.org !== "Resolving WHOIS...") {
+                whoisCache[data.src_ip] = data.whois;
+                document.getElementById("incOrg").innerText = data.whois.org;
+            } else if (whoisCache[data.src_ip]) {
+                document.getElementById("incOrg").innerText = whoisCache[data.src_ip].org;
+            } else {
+                document.getElementById("incOrg").innerText = "Resolving WHOIS...";
+            }
+
             if (!isUnderAttack) {
                 isUnderAttack = true;
                 currentAlertCount = 0;
@@ -234,8 +390,205 @@
             
             currentAlertCount++;
             document.getElementById("incAlerts").innerText = currentAlertCount;
+        } else if (data.whitelisted && data.whitelist_reason) {
+            // Optional log for whitelisted activity
+            // (Throttled via last_emit_time from server)
         }
     });
+
+    // Handle incoming WHOIS Intelligence resolution
+    socket.on("whois_result", (data) => {
+        const whois = data.whois || {};
+        whoisCache[data.src_ip] = whois;
+
+        if (currentAttackIp === data.src_ip) {
+            document.getElementById("incOrg").innerText = whois.org || "Unknown Organization";
+            document.getElementById("incOrg").title = `${whois.net_name || ''} (${whois.country || ''})`;
+        }
+
+        log(`[WHOIS TRACE] Source ${data.src_ip} attributed to: ${whois.org || 'Unknown'} (${whois.country || 'N/A'}, Net: ${whois.net_name || 'N/A'})`, false);
+
+        if (activeModalIp === data.src_ip) {
+            renderWhoisModal(whois);
+        }
+    });
+
+    // --- WHOIS Modal Functions ---
+    async function showWhoisModal(ip) {
+        if (!ip) return;
+        activeModalIp = ip;
+        document.getElementById("whoisModal").classList.remove("hidden");
+        document.getElementById("whoisModalSubtitle").innerText = `Investigating source: ${ip}`;
+
+        if (whoisCache[ip]) {
+            renderWhoisModal(whoisCache[ip]);
+            return;
+        }
+
+        // Show loading state and fetch from API
+        renderWhoisModal({
+            ip: ip,
+            hostname: "Resolving...",
+            org: "Querying WHOIS registry...",
+            country: "--",
+            net_name: "--",
+            net_range: "--",
+            raw: `Querying public WHOIS registries for ${ip}... Please wait.`
+        });
+
+        try {
+            const res = await fetch(`/whois/${ip}`);
+            const data = await res.json();
+            whoisCache[ip] = data;
+            if (activeModalIp === ip) {
+                renderWhoisModal(data);
+            }
+        } catch (err) {
+            renderWhoisModal({
+                ip: ip,
+                hostname: ip,
+                org: "Lookup Failed",
+                country: "Error",
+                net_name: "--",
+                net_range: "--",
+                raw: `Failed to query WHOIS for ${ip}: ${err.message}`
+            });
+        }
+    }
+
+    function renderWhoisModal(data) {
+        document.getElementById("whoisIp").innerText = data.ip || activeModalIp || "--";
+        document.getElementById("whoisHost").innerText = data.hostname ? `DNS: ${data.hostname}` : "DNS: N/A";
+        document.getElementById("whoisHost").title = data.hostname || "";
+        document.getElementById("whoisOrg").innerText = data.org || "Unknown";
+        document.getElementById("whoisCountry").innerText = data.country ? `Country: ${data.country}` : "Country: N/A";
+        document.getElementById("whoisNetName").innerText = data.net_name || "--";
+        document.getElementById("whoisRange").innerText = data.net_range || "--";
+        document.getElementById("whoisRaw").innerText = data.raw || "No raw registry data returned.";
+    }
+
+    function closeWhoisModal() {
+        document.getElementById("whoisModal").classList.add("hidden");
+        activeModalIp = null;
+    }
+
+    function copyWhoisRaw() {
+        const text = document.getElementById("whoisRaw").innerText;
+        navigator.clipboard.writeText(text);
+        log("Copied WHOIS registry response to clipboard");
+    }
+
+    async function whitelistCurrentWhoisIp() {
+        if (!activeModalIp) return;
+        const currentData = whoisCache[activeModalIp] || {};
+        const desc = currentData.org || "Trusted Security Source";
+        
+        try {
+            const res = await fetch("/whitelist/add", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip: activeModalIp, description: desc })
+            });
+            const data = await res.json();
+            if (data.status === "added") {
+                log(`Added ${activeModalIp} to trusted whitelist (${desc})`);
+                closeWhoisModal();
+                loadWhitelist();
+            }
+        } catch (err) {
+            log(`Failed to whitelist ${activeModalIp}: ${err.message}`, true);
+        }
+    }
+
+    // --- Whitelist Management Modal Functions ---
+    async function openWhitelistModal() {
+        document.getElementById("whitelistModal").classList.remove("hidden");
+        await loadWhitelist();
+    }
+
+    function closeWhitelistModal() {
+        document.getElementById("whitelistModal").classList.add("hidden");
+    }
+
+    async function loadWhitelist() {
+        try {
+            const res = await fetch("/whitelist");
+            const data = await res.json();
+            const whitelist = data.whitelist || {};
+            const tbody = document.getElementById("whitelistBody");
+            tbody.innerHTML = "";
+
+            const entries = Object.entries(whitelist);
+            document.getElementById("wlCountBadge").innerText = `${entries.length} Active`;
+
+            entries.forEach(([ip, desc]) => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td class="p-2 text-white font-mono font-bold">${ip}</td>
+                    <td class="p-2 text-gray-300">${desc}</td>
+                    <td class="p-2 text-right">
+                        <button onclick="removeWhitelistEntry('${ip}')" class="text-accentRed hover:text-accentRed/80 hover:underline px-2 py-1" title="Remove from whitelist">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (err) {
+            console.error("Failed to load whitelist", err);
+        }
+    }
+
+    async function addWhitelistEntry() {
+        const ipInput = document.getElementById("newWlIp");
+        const descInput = document.getElementById("newWlDesc");
+        const ip = ipInput.value.trim();
+        const desc = descInput.value.trim() || "User Added Host";
+
+        if (!ip) {
+            alert("Please enter an IP address to whitelist.");
+            return;
+        }
+
+        try {
+            const res = await fetch("/whitelist/add", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip: ip, description: desc })
+            });
+            const data = await res.json();
+            if (data.status === "added") {
+                ipInput.value = "";
+                descInput.value = "";
+                log(`Added ${ip} to trusted whitelist (${desc})`);
+                await loadWhitelist();
+            } else {
+                alert(data.error || "Failed to add IP");
+            }
+        } catch (err) {
+            alert("Error adding whitelist entry: " + err.message);
+        }
+    }
+
+    async function removeWhitelistEntry(ip) {
+        if (!confirm(`Are you sure you want to remove ${ip} from the trusted whitelist?`)) return;
+        try {
+            const res = await fetch("/whitelist/remove", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip: ip })
+            });
+            const data = await res.json();
+            if (data.status === "removed") {
+                log(`Removed ${ip} from trusted whitelist`);
+                await loadWhitelist();
+            } else {
+                alert(data.error || "Failed to remove IP");
+            }
+        } catch (err) {
+            alert("Error removing whitelist entry: " + err.message);
+        }
+    }
 
     // --- THESE FUNCTIONS ARE NOW CORRECTLY OUTSIDE THE SOCKET LISTENER ---
     
@@ -308,9 +661,10 @@
         }
     }
 
-    // Auto-load interfaces on page startup
+    // Auto-load interfaces and whitelist on page startup
     window.onload = async () => {
         await loadInterfaces();
+        await loadWhitelist();
     };
 </script>
 </body>

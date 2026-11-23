@@ -1,0 +1,15 @@
+Flask
+flask-cors
+flask-socketio
+gevent
+greenlet
+joblib
+lightgbm
+numpy
+pandas
+psutil
+requests
+scapy
+scikit-learn
+scipy
+Werkzeug

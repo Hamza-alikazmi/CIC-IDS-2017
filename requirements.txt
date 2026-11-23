@@ -13,6 +13,9 @@ executing
 filelock
 Flask
 flask-cors
+flask-socketio
+PyQt5
+PyQtWebEngine
 future
 gevent
 greenlet

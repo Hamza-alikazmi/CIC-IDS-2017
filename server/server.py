@@ -9,13 +9,18 @@ from flask_socketio import SocketIO
 import joblib
 import pandas as pd
 from pathlib import Path
+import ipaddress
+import subprocess
+import re
+from concurrent.futures import ThreadPoolExecutor
+import socket
+import os
+import logging
+import json
+import datetime
 # -------------------------------
 # 🛡️ SOC Logging Configuration
 # -------------------------------
-import os
-import logging
-
-# AppImages are read-only. We MUST write logs to a writable directory on the host.
 HOME_DIR = os.path.expanduser("~")
 APP_DIR = os.path.join(HOME_DIR, ".nids_app")
 
@@ -33,7 +38,48 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) 
+
+# -------------------------------
+# Wazuh Syslog Integration
+# -------------------------------
+WAZUH_ENABLED = os.getenv("WAZUH_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+WAZUH_HOST = os.getenv("WAZUH_HOST", "wazuh.manager")
+WAZUH_PORT = int(os.getenv("WAZUH_PORT", "514"))
+WAZUH_PROTOCOL = os.getenv("WAZUH_PROTOCOL", "udp").lower()
+WAZUH_FACILITY = int(os.getenv("WAZUH_FACILITY", "1"))  # 1 = user
+WAZUH_APP_NAME = os.getenv("WAZUH_APP_NAME", "cic-ids-nids")
+WAZUH_FORWARDER_HOSTNAME = os.getenv("HOSTNAME", socket.gethostname())
+
+
+def send_wazuh_alert(result):
+    """Forward an alert to Wazuh using syslog (UDP or TCP)."""
+    if not WAZUH_ENABLED:
+        return False
+
+    alert = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "integration": "cic-ids-2017",
+        "rule": {"description": "CIC-IDS-2017 network intrusion detected"},
+        "data": dict(result),
+    }
+    priority = WAZUH_FACILITY * 8 + 4  # warning
+    message = (
+        f"<{priority}>1 {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} "
+        f"{WAZUH_FORWARDER_HOSTNAME} {WAZUH_APP_NAME} - - - {json.dumps(alert, default=str)}"
+    ).encode("utf-8")
+
+    try:
+        if WAZUH_PROTOCOL == "tcp":
+            with socket.create_connection((WAZUH_HOST, WAZUH_PORT), timeout=3) as sock:
+                sock.sendall(message + b"\n")
+        else:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.sendto(message, (WAZUH_HOST, WAZUH_PORT))
+        return True
+    except Exception as exc:
+        logger.error("Failed to forward alert to Wazuh %s:%s: %s", WAZUH_HOST, WAZUH_PORT, exc)
+        return False
 
 # Load trained model
 BASE_DIR = Path(__file__).resolve().parent
@@ -64,11 +110,136 @@ FEATURES = [
 ]
 
 def predict_flow(flow_dict):
-    # Convert dict to list in FEATURE order
-    flow_array = [flow_dict[f] for f in FEATURES]  # list of 42 values
+    # Convert dict to list in FEATURE order (defaulting missing features to 0)
+    flow_array = [flow_dict.get(f, 0) for f in FEATURES]  # list of 42 values
     df = pd.DataFrame([flow_array], columns=FEATURES)
     prediction = model.predict(df)[0]
     return prediction
+
+# -------------------------------
+# 🛡️ Trusted Whitelist (Google DNS & False-Positive Prevention)
+# -------------------------------
+DEFAULT_WHITELIST = {
+    "8.8.8.8": "Google Public DNS Primary",
+    "8.8.4.4": "Google Public DNS Secondary",
+    "2001:4860:4860::8888": "Google Public DNS IPv6",
+    "2001:4860:4860::8884": "Google Public DNS IPv6",
+    "1.1.1.1": "Cloudflare DNS Primary",
+    "1.0.0.1": "Cloudflare DNS Secondary",
+    "9.9.9.9": "Quad9 DNS Primary"
+}
+whitelisted_ips = dict(DEFAULT_WHITELIST)
+
+def is_whitelisted(src, dst, src_port=0, dst_port=0):
+    if src in whitelisted_ips:
+        return True, whitelisted_ips[src]
+    if dst in whitelisted_ips:
+        return True, whitelisted_ips[dst]
+    return False, None
+
+# -------------------------------
+# 🔍 WHOIS Intelligence & Threat Attribution
+# -------------------------------
+whois_cache = {}
+whois_pending = set()
+whois_executor = ThreadPoolExecutor(max_workers=5)
+
+def perform_whois_lookup(ip_str):
+    if not ip_str or not isinstance(ip_str, str):
+        return {"error": "Invalid IP address"}
+
+    if ip_str in whois_cache:
+        return whois_cache[ip_str]
+
+    # Check for private/bogon/loopback IP
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+            hostname = ip_str
+            try:
+                hostname = socket.gethostbyaddr(ip_str)[0]
+            except Exception:
+                pass
+            info = {
+                "ip": ip_str,
+                "is_private": True,
+                "org": "Private / Internal LAN (RFC 1918)",
+                "net_name": "Local Network Subnet",
+                "country": "LOCAL / LAN",
+                "net_range": "Private IP Space (Non-routable)",
+                "hostname": hostname,
+                "raw": f"IP Address: {ip_str}\nClassification: RFC 1918 Private / Local Network\nHostname / Reverse DNS: {hostname}\nNote: Local and private addresses cannot be queried on public WHOIS registries."
+            }
+            whois_cache[ip_str] = info
+            return info
+    except Exception:
+        pass
+
+    # Public IP lookup
+    info = {
+        "ip": ip_str,
+        "is_private": False,
+        "org": "Unknown Organization",
+        "net_name": "Unknown Network",
+        "country": "Unknown",
+        "net_range": "Unknown Range",
+        "hostname": ip_str,
+        "raw": ""
+    }
+
+    try:
+        info["hostname"] = socket.gethostbyaddr(ip_str)[0]
+    except Exception:
+        pass
+
+    try:
+        proc = subprocess.run(
+            ["whois", ip_str],
+            capture_output=True,
+            text=True,
+            timeout=6
+        )
+        out = proc.stdout if proc.stdout else proc.stderr or ""
+        info["raw"] = out[:4000]
+
+        org_match = re.search(r'(?i)(?:OrgName|organisation|organization|descr|owner):\s*([^\r\n]+)', out)
+        net_match = re.search(r'(?i)(?:NetName|netname):\s*([^\r\n]+)', out)
+        country_match = re.search(r'(?i)(?:Country|country):\s*([A-Za-z]{2,})', out)
+        range_match = re.search(r'(?i)(?:CIDR|inetnum|NetRange):\s*([^\r\n]+)', out)
+
+        if org_match: info["org"] = org_match.group(1).strip()
+        if net_match: info["net_name"] = net_match.group(1).strip()
+        if country_match: info["country"] = country_match.group(1).strip().upper()
+        if range_match: info["net_range"] = range_match.group(1).strip()
+    except subprocess.TimeoutExpired:
+        info["org"] = "Lookup Timeout"
+        info["raw"] = f"WHOIS query for {ip_str} timed out after 6 seconds."
+    except Exception as e:
+        info["org"] = "Lookup Failed"
+        info["raw"] = f"Error during WHOIS query: {e}"
+
+    whois_cache[ip_str] = info
+    return info
+
+def _async_whois_handler(src_ip, threat_type, dst_ip, src_port, dst_port):
+    try:
+        whois_data = perform_whois_lookup(src_ip)
+        logger.warning(
+            f"WHOIS SOURCE TRACE: IP={src_ip}, Threat='{threat_type}', Org='{whois_data.get('org')}', Net='{whois_data.get('net_name')}', Country='{whois_data.get('country')}'"
+        )
+        socketio.emit("whois_result", {
+            "src_ip": src_ip,
+            "threat_type": threat_type,
+            "dst_ip": dst_ip,
+            "src_port": src_port,
+            "dst_port": dst_port,
+            "whois": whois_data
+        })
+    except Exception as e:
+        logger.error(f"Error during async WHOIS lookup for {src_ip}: {e}")
+    finally:
+        whois_pending.discard(src_ip)
+
 
 
 # -------------------------------
@@ -249,7 +420,15 @@ def process_packet(pkt):
 
     if features:
         try:
-            pred = predict_flow(features)
+            raw_pred = predict_flow(features)
+            
+            # 🛡️ Check Whitelist (Google DNS, trusted services) to suppress false positives
+            whitelisted, wl_reason = is_whitelisted(src, dst, src_port, dst_port)
+            if whitelisted and raw_pred != "BENIGN":
+                pred = "BENIGN"
+                logger.info(f"BENIGN OVERRIDE: Suppressed false alarm '{raw_pred}' for trusted traffic ({src}:{src_port} -> {dst}:{dst_port}) matching '{wl_reason}'.")
+            else:
+                pred = raw_pred
             
             latest_result = {
                 "src_ip": src,
@@ -260,14 +439,27 @@ def process_packet(pkt):
                 "Flow Bytes/s": features.get("Flow Bytes/s", 0),
                 "Flow Duration": features.get("Flow Duration", 0) * 1000, 
                 "Flow Packets/s": features.get("Flow Packets/s", 0),
-                "prediction": pred
+                "prediction": pred,
+                "whitelisted": whitelisted,
+                "whitelist_reason": wl_reason if whitelisted else None
             }
 
             current_time = time.time()
             
-            # 🛡️ SOC Logging: Log the exact attack details to the file
+            # 🛡️ SOC Logging & WHOIS Attribution
             if pred != "BENIGN":
                 logger.warning(f"THREAT DETECTED: Type='{pred}', Source={src}:{src_port}, Target={dst}:{dst_port}, Proto={latest_result['protocol']}")
+                send_wazuh_alert(latest_result)
+                
+                # Check WHOIS cache or dispatch non-blocking background lookup
+                cached_whois = whois_cache.get(src)
+                if cached_whois:
+                    latest_result["whois"] = cached_whois
+                else:
+                    latest_result["whois"] = {"status": "resolving", "ip": src, "org": "Resolving WHOIS..."}
+                    if src not in whois_pending:
+                        whois_pending.add(src)
+                        whois_executor.submit(_async_whois_handler, src, pred, dst, src_port, dst_port)
 
             # Always emit if it is an attack, OR if 0.5 seconds have passed (for smooth graph)
             if pred != "BENIGN" or (current_time - last_emit_time > 0.5):
@@ -286,6 +478,72 @@ socketio = SocketIO(app, cors_allowed_origins="*",async_mode='threading')
 @app.route("/", methods=["GET"])
 def get_flows():
     return render_template("dashboard.html")    
+
+@app.route("/form", methods=["GET"])
+def form_view():
+    return render_template("index.html")
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    try:
+        data = request.get_json(force=True) or {}
+        src = data.get("src_ip", "")
+        dst = data.get("dst_ip", "")
+        raw_pred = predict_flow(data)
+        whitelisted, wl_reason = is_whitelisted(src, dst)
+        if whitelisted and raw_pred != "BENIGN":
+            prediction = "BENIGN"
+        else:
+            prediction = raw_pred
+        return jsonify({
+            "prediction": str(prediction),
+            "status": "success",
+            "whitelisted": whitelisted,
+            "whitelist_reason": wl_reason if whitelisted else None
+        })
+    except Exception as e:
+        logger.error(f"Prediction failed: {e}")
+        return jsonify({"error": str(e), "status": "error"}), 400
+
+@app.route("/whois/<path:ip>", methods=["GET"])
+def get_whois(ip):
+    try:
+        data = perform_whois_lookup(ip)
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"WHOIS lookup error for {ip}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/whitelist", methods=["GET"])
+def get_whitelist():
+    return jsonify({"whitelist": whitelisted_ips, "count": len(whitelisted_ips)})
+
+@app.route("/whitelist/add", methods=["POST"])
+def add_whitelist():
+    try:
+        body = request.get_json(force=True) or {}
+        ip = body.get("ip", "").strip()
+        desc = body.get("description", "User Added Trusted Host").strip()
+        if not ip:
+            return jsonify({"error": "IP address is required"}), 400
+        whitelisted_ips[ip] = desc
+        logger.info(f"Added IP '{ip}' ({desc}) to trusted whitelist.")
+        return jsonify({"status": "added", "ip": ip, "description": desc, "whitelist": whitelisted_ips})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/whitelist/remove", methods=["POST"])
+def remove_whitelist():
+    try:
+        body = request.get_json(force=True) or {}
+        ip = body.get("ip", "").strip()
+        if ip in whitelisted_ips:
+            desc = whitelisted_ips.pop(ip)
+            logger.info(f"Removed IP '{ip}' ({desc}) from trusted whitelist.")
+            return jsonify({"status": "removed", "ip": ip, "whitelist": whitelisted_ips})
+        return jsonify({"error": f"IP '{ip}' not found in whitelist"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/interfaces", methods=["GET"])
 def interfaces():
@@ -312,9 +570,19 @@ def start_sniff():
         return jsonify({"status": "already running"})
 
     stop_sniff_flag = False
-    sniff_thread = threading.Thread(target=lambda: sniff(
-        iface=iface, prn=process_packet, store=0, stop_filter=lambda x: stop_sniff_flag
-    ))
+    def run_sniff():
+        try:
+            sniff(iface=iface, prn=process_packet, store=0, stop_filter=lambda x: stop_sniff_flag)
+        except PermissionError:
+            logger.error(
+                f"Permission denied for live packet capture on interface '{iface}'. "
+                "Packet sniffing requires raw socket capabilities: "
+                "sudo setcap cap_net_raw,cap_net_admin=eip <python_binary>"
+            )
+        except Exception as e:
+            logger.error(f"Error while sniffing on interface '{iface}': {e}")
+
+    sniff_thread = threading.Thread(target=run_sniff)
     sniff_thread.daemon = True
     sniff_thread.start()
     
@@ -333,8 +601,30 @@ def stop_sniff():
         return jsonify({"status": "stopped"})
     return jsonify({"status": "not running"})
 
-if __name__ == "__main__":
-    logger.info("Starting NIDS Server Framework...")
-    print("[*] Starting IDS Server...")
-    print("[*] Flask running with WebSocket at http://localhost:5000")
-    socketio.run(app, debug=False)
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "healthy", "uptime": get_uptime_seconds()})
+
+def get_uptime_seconds():
+    try:
+        with open("/proc/uptime", "r") as f:
+            uptime_seconds = float(f.readline().split()[0])
+            return int(uptime_seconds)
+    except Exception:
+        return 0
+
+@app.route("/status", methods=["GET"])
+def status():
+    return jsonify({
+        "status": "running",
+        "active_flows": len(flows),
+        "capture_running": bool(sniff_thread and sniff_thread.is_alive()),
+        "wazuh": {
+            "enabled": WAZUH_ENABLED,
+            "host": WAZUH_HOST,
+            "port": WAZUH_PORT,
+            "protocol": WAZUH_PROTOCOL
+        },
+        "whitelisted_ips": whitelisted_ips,
+        "model_features": FEATURES
+    })

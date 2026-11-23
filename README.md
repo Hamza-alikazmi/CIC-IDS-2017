@@ -60,6 +60,16 @@ curl -X POST http://127.0.0.1:5000/predict \
   -d '{"Flow Bytes/s": 0, "Flow Duration": 1, "Flow Packets/s": 0, ... }'
 ```
 
+## Threat Attribution (WHOIS) & Trusted Whitelist
+
+- **WHOIS Intelligence**: When an attack is flagged, an asynchronous WHOIS query is dispatched on the source IP to determine the attacking organization, network name, CIDR, and country code without blocking packet sniffing.
+  - API endpoint: `GET http://127.0.0.1:5000/whois/<ip>`
+- **Trusted Whitelist (Google DNS)**: High-frequency queries to known DNS resolvers (such as Google DNS `8.8.8.8`, `8.8.4.4` and Cloudflare `1.1.1.1`) are pre-whitelisted and marked `BENIGN` to avoid false alerts when running recon tools.
+  - View Whitelist: `GET http://127.0.0.1:5000/whitelist`
+  - Add Whitelisted Host: `POST http://127.0.0.1:5000/whitelist/add` with `{"ip": "...", "description": "..."}`
+  - Remove Whitelisted Host: `POST http://127.0.0.1:5000/whitelist/remove` with `{"ip": "..."}`
+  - Web UI: Click the **Trusted Whitelist** button in the dashboard to view and manage whitelisted IPs.
+
 The request body should contain flow features matching the feature set defined in `server/detector.py`.
 
 ## Important details
@@ -67,6 +77,47 @@ The request body should contain flow features matching the feature set defined i
 - `server/server.py` captures live packets using `scapy` and extracts features per flow.
 - `server/detector.py` loads a LightGBM model from `server/ids_model.pkl` and predicts a label using the defined feature order.
 - `main.py` is a simple dataset preview script and does not run the IDS server.
+
+## Docker and Wazuh integration
+
+### Run locally
+
+```bash
+./run.sh
+```
+
+The script creates or uses `.venv`, installs dependencies, and starts the server with sudo when needed for packet capture.
+
+### Run with Docker
+
+```bash
+cp .env.example .env
+./run-docker.sh
+```
+
+The dashboard is available at `http://127.0.0.1:5000`. Docker uses host networking and privileged mode so Scapy can access host interfaces.
+
+Useful endpoints:
+
+- `GET /health`
+- `GET /status`
+- `POST /start` with `{"interface":"eth0"}`
+- `POST /stop`
+
+### Forward alerts to Wazuh
+
+Configure these environment variables before starting the server:
+
+```bash
+WAZUH_ENABLED=true
+WAZUH_HOST=192.168.1.100
+WAZUH_PORT=514
+WAZUH_PROTOCOL=udp
+```
+
+Supported protocols are `udp` and `tcp`. Alert forwarding uses RFC 5424-style syslog and sends the detected flow as JSON. Configure the Wazuh manager or agent to listen on the selected syslog port and add/adjust a local decoder/rule for the `cic-ids-nids` application name.
+
+Check configuration through `GET /status`.
 
 ## Contributing
 
