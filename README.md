@@ -78,6 +78,12 @@ The request body should contain flow features matching the feature set defined i
 - `server/detector.py` loads a LightGBM model from `server/ids_model.pkl` and predicts a label using the defined feature order.
 - `main.py` is a simple dataset preview script and does not run the IDS server.
 
+## Demo
+
+Watch the project demonstration: [`CIC NIDS Demo.mp4`](Demo/CIC%20NIDS%20Demo.mp4).
+
+The video is also stored in the [`Demo/`](Demo/) folder.
+
 ## Docker and Wazuh integration
 
 ### Run locally
@@ -118,6 +124,48 @@ WAZUH_PROTOCOL=udp
 Supported protocols are `udp` and `tcp`. Alert forwarding uses RFC 5424-style syslog and sends the detected flow as JSON. Configure the Wazuh manager or agent to listen on the selected syslog port and add/adjust a local decoder/rule for the `cic-ids-nids` application name.
 
 Check configuration through `GET /status`.
+
+## Model performance
+
+The intrusion detection model is a Random Forest classifier trained on the CIC-IDS-2017 network flow dataset.
+
+- **Training set score:** 0.9984 (99.84%)
+- **Test set score:** 0.9984 (99.84%)
+
+The consistent training and test scores indicate strong classification performance without a substantial score gap in this evaluation.
+
+### Confusion matrix
+
+The confusion matrix below compares the true traffic labels with the labels predicted by the Random Forest model across BENIGN traffic and multiple attack categories.
+
+![Random Forest confusion matrix](Demo/confusion%20matrix.png)
+
+### Top 20 selected features
+
+Feature selection identified the following flow attributes as the most influential for model predictions:
+
+- Destination Port
+- Init_Win_bytes_backward
+- Total Length of Bwd Packets
+- Subflow Bwd Bytes
+- Packet Length Mean
+- Bwd Packet Length Mean
+- Bwd Packets/s
+- Flow Duration
+- Fwd IAT Mean
+- Flow IAT Mean
+- Total Length of Fwd Packets
+- Init_Win_bytes_forward
+- Subflow Fwd Bytes
+- Fwd Header Length
+- Average Packet Size
+- Packet Length Std
+- Flow IAT Std
+- Fwd Packet Length Mean
+- Fwd IAT Std
+- Fwd Packets/s
+
+![Top 20 influential network features](Demo/Top%2020%20features.png)
 
 ## Contributing
 
