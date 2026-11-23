@@ -628,3 +628,10 @@ def status():
         "whitelisted_ips": whitelisted_ips,
         "model_features": FEATURES
     })
+
+
+if __name__ == "__main__":
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "5000"))
+    logger.info("Starting NIDS web server on http://%s:%s", host, port)
+    socketio.run(app, host=host, port=port, debug=False, use_reloader=False)
