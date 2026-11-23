@@ -80,7 +80,7 @@ The request body should contain flow features matching the feature set defined i
 
 ## Demo
 
-Watch the project demonstration: [`CIC NIDS Demo.mp4`](Demo/CIC%20NIDS%20Demo.mp4).
+Watch the project demonstration: ![`CIC NIDS Demo.mp4`](Demo/CIC%20NIDS%20Demo.mp4).
 
 The video is also stored in the [`Demo/`](Demo/) folder.
 
